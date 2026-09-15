@@ -1,0 +1,22 @@
+{
+  "name": "apex-aim-trainer",
+  "version": "1.0.0",
+  "description": "Apex-artiger Web Aim Trainer in Ego-Perspektive (Three.js/WebGL), optimiert auf flüssige 60 FPS.",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "aim-trainer",
+    "apex",
+    "fps",
+    "threejs",
+    "webgl",
+    "game"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.169.0"
+  }
+}

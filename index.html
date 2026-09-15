@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>APEX AIM — Web Aim Trainer</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <!-- Three.js lokal gebündelt (kein CDN nötig, offline-fähig). Per HTTP-Server öffnen. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/js/vendor/three.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <!-- 3D Canvas -->
+  <div id="game-root">
+    <canvas id="scene"></canvas>
+
+    <!-- HUD -->
+    <div id="hud" class="hidden">
+      <!-- Crosshair (DOM, gestochen scharf) -->
+      <div id="crosshair">
+        <div class="ch-dot"></div>
+        <div class="ch-line ch-top"></div>
+        <div class="ch-line ch-bottom"></div>
+        <div class="ch-line ch-left"></div>
+        <div class="ch-line ch-right"></div>
+      </div>
+
+      <!-- Hitmarker -->
+      <div id="hitmarker"></div>
+
+      <!-- Damage-Flash bei Treffer durch Bot -->
+      <div id="damage-flash"></div>
+
+      <!-- Oben links: Live-Stats -->
+      <div id="stats-panel">
+        <div class="stat"><span class="stat-label">Zeit</span><span id="stat-time" class="stat-val">60.0</span></div>
+        <div class="stat"><span class="stat-label">Score</span><span id="stat-score" class="stat-val">0</span></div>
+        <div class="stat"><span class="stat-label">Acc</span><span id="stat-acc" class="stat-val">100%</span></div>
+        <div class="stat" id="stat-reaction-wrap"><span class="stat-label">Ø React</span><span id="stat-reaction" class="stat-val">—</span></div>
+        <div class="stat" id="stat-kills-wrap"><span class="stat-label">Kills</span><span id="stat-kills" class="stat-val">0</span></div>
+      </div>
+
+      <!-- Oben rechts: FPS -->
+      <div id="fps-panel"><span id="fps-val">60</span> FPS</div>
+
+      <!-- Unten links: HP -->
+      <div id="health-panel" class="hidden">
+        <div class="hp-label">HP</div>
+        <div class="hp-bar"><div id="hp-fill"></div></div>
+      </div>
+
+      <!-- Unten rechts: Waffe + Ammo -->
+      <div id="weapon-panel">
+        <div id="weapon-name">R-99</div>
+        <div id="ammo"><span id="ammo-mag">20</span><span class="ammo-sep">/</span><span id="ammo-reserve">∞</span></div>
+        <div id="reload-hint" class="hidden">NACHLADEN [R]</div>
+      </div>
+    </div>
+
+    <!-- Hauptmenü -->
+    <div id="menu" class="overlay">
+      <div class="menu-box">
+        <h1 class="title">APEX<span class="title-accent">AIM</span></h1>
+        <p class="subtitle">Web Aim Trainer · Ego-Perspektive · 60 FPS</p>
+
+        <div class="mode-grid">
+          <button class="mode-card" data-mode="flick">
+            <div class="mode-icon">◎</div>
+            <div class="mode-name">Flick / Clicking</div>
+            <div class="mode-desc">Statische Ziele blitzschnell treffen. Präzision & Reaktion.</div>
+            <div class="mode-best" data-best="flick">Best: —</div>
+          </button>
+          <button class="mode-card" data-mode="tracking">
+            <div class="mode-icon">∿</div>
+            <div class="mode-name">Tracking</div>
+            <div class="mode-desc">Strafendes Ziel im Beam halten. Smoothness zählt.</div>
+            <div class="mode-best" data-best="tracking">Best: —</div>
+          </button>
+          <button class="mode-card" data-mode="switching">
+            <div class="mode-icon">⁙</div>
+            <div class="mode-name">Target Switching</div>
+            <div class="mode-desc">Mehrere Ziele, schnelles Umsetzen zwischen ihnen.</div>
+            <div class="mode-best" data-best="switching">Best: —</div>
+          </button>
+          <button class="mode-card" data-mode="duel">
+            <div class="mode-icon">⚔</div>
+            <div class="mode-name">Strafe-Duell</div>
+            <div class="mode-desc">Bot springt, strafed & schießt zurück. Echtes 1v1-Gefühl.</div>
+            <div class="mode-best" data-best="duel">Best: —</div>
+          </button>
+        </div>
+
+        <div class="menu-row">
+          <label class="field">
+            <span>Waffe</span>
+            <select id="menu-weapon">
+              <option value="r99">R-99 (SMG · schnell)</option>
+              <option value="flatline">Flatline (AR · hartes Recoil)</option>
+              <option value="wingman">Wingman (Pistole · High-Skill)</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Rundenlänge</span>
+            <select id="menu-duration">
+              <option value="30">30 Sek</option>
+              <option value="60" selected>60 Sek</option>
+              <option value="120">120 Sek</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="menu-actions">
+          <button id="btn-start" class="btn btn-primary">SPIELEN</button>
+          <button id="btn-settings" class="btn">Einstellungen</button>
+        </div>
+        <p class="hint">Klicke „Spielen“ → Maus wird gefangen (Pointer Lock). <kbd>Esc</kbd> pausiert.</p>
+      </div>
+    </div>
+
+    <!-- Einstellungen -->
+    <div id="settings" class="overlay hidden">
+      <div class="menu-box settings-box">
+        <h2>Einstellungen</h2>
+
+        <div class="settings-grid">
+          <div class="settings-col">
+            <h3>Steuerung</h3>
+            <label class="slider-field">
+              <span>Maus-Sensitivität <b id="v-sens">1.00</b></span>
+              <input type="range" id="s-sens" min="0.05" max="3" step="0.01" value="1" />
+            </label>
+            <label class="slider-field">
+              <span>FOV <b id="v-fov">100</b>°</span>
+              <input type="range" id="s-fov" min="70" max="120" step="1" value="100" />
+            </label>
+            <label class="checkbox-field">
+              <input type="checkbox" id="s-invert" /> <span>Y-Achse invertieren</span>
+            </label>
+
+            <h3>Fadenkreuz</h3>
+            <label class="slider-field">
+              <span>Größe <b id="v-ch-size">10</b>px</span>
+              <input type="range" id="s-ch-size" min="2" max="24" step="1" value="10" />
+            </label>
+            <label class="slider-field">
+              <span>Lücke <b id="v-ch-gap">4</b>px</span>
+              <input type="range" id="s-ch-gap" min="0" max="20" step="1" value="4" />
+            </label>
+            <label class="slider-field">
+              <span>Dicke <b id="v-ch-thick">2</b>px</span>
+              <input type="range" id="s-ch-thick" min="1" max="6" step="1" value="2" />
+            </label>
+            <label class="checkbox-field">
+              <input type="checkbox" id="s-ch-dot" checked /> <span>Punkt in der Mitte</span>
+            </label>
+            <label class="color-field">
+              <span>Farbe</span>
+              <input type="color" id="s-ch-color" value="#00ff9c" />
+            </label>
+          </div>
+
+          <div class="settings-col">
+            <h3>Gameplay</h3>
+            <label class="slider-field">
+              <span>Zielgröße <b id="v-target">1.00</b>×</span>
+              <input type="range" id="s-target" min="0.5" max="2" step="0.05" value="1" />
+            </label>
+
+            <h3>Grafik & Performance</h3>
+            <label class="checkbox-field">
+              <input type="checkbox" id="s-aa" checked /> <span>Kantenglättung (AA)</span>
+            </label>
+            <label class="checkbox-field">
+              <input type="checkbox" id="s-shadows" /> <span>Schatten (kostet FPS)</span>
+            </label>
+            <label class="checkbox-field">
+              <input type="checkbox" id="s-perf" /> <span>Perf-Modus (Pixel-Ratio 1, minimal)</span>
+            </label>
+            <label class="checkbox-field">
+              <input type="checkbox" id="s-fpscap" /> <span>FPS auf 60 begrenzen</span>
+            </label>
+
+            <h3>Audio</h3>
+            <label class="slider-field">
+              <span>Lautstärke <b id="v-vol">50</b>%</span>
+              <input type="range" id="s-vol" min="0" max="100" step="1" value="50" />
+            </label>
+          </div>
+        </div>
+
+        <div class="menu-actions">
+          <button id="btn-settings-back" class="btn btn-primary">Zurück</button>
+          <button id="btn-settings-reset" class="btn">Zurücksetzen</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pause -->
+    <div id="pause" class="overlay hidden">
+      <div class="menu-box small">
+        <h2>Pause</h2>
+        <div class="menu-actions column">
+          <button id="btn-resume" class="btn btn-primary">Weiter (klicken)</button>
+          <button id="btn-restart" class="btn">Neustart</button>
+          <button id="btn-quit" class="btn">Zum Menü</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rundenende -->
+    <div id="results" class="overlay hidden">
+      <div class="menu-box">
+        <h2 id="results-title">Runde beendet</h2>
+        <div id="results-grid" class="results-grid"></div>
+        <div id="results-best" class="results-best"></div>
+        <div class="menu-actions">
+          <button id="btn-again" class="btn btn-primary">Nochmal</button>
+          <button id="btn-menu" class="btn">Menü</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Klick-zum-Fokus Hinweis, wenn Pointer Lock verloren geht -->
+    <div id="click-resume" class="click-resume hidden">Klicken um weiterzuspielen</div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
