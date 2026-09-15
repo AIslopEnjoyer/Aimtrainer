@@ -236,6 +236,19 @@ export class UI {
     this._hitmarkerTimer = setTimeout(() => h.classList.remove('show'), kill ? 140 : 90);
   }
 
+  setCrosshairPos(x, y) {
+    this.el.crosshair.style.left = x + 'px';
+    this.el.crosshair.style.top = y + 'px';
+  }
+  resetCrosshairPos() {
+    this.el.crosshair.style.left = '';
+    this.el.crosshair.style.top = '';
+  }
+  setCursorHint(show) {
+    const h = document.getElementById('cursor-hint');
+    if (h) h.classList.toggle('hidden', !show);
+  }
+
   muzzleFlash() {
     const m = this.el.muzzle;
     m.classList.remove('flash');

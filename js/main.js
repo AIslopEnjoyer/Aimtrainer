@@ -19,6 +19,11 @@ class Game {
     this.semiRequested = false;
     this.lastAntialias = settings.antialias;
 
+    // Cursor-Ziel-Fallback, falls Pointer-Lock nicht verfügbar ist (z.B. eingebettet).
+    this.cursorAim = false;
+    this.mouseNDC = { x: 0, y: 0 };
+    this._lockCheck = null;
+
     this.weapon = new Weapon('r99');
     this.stats = new Stats();
     this.mode = null;
@@ -64,7 +69,7 @@ class Game {
 
   bindUI() {
     this.ui.on('start', (mode, weapon, duration) => this.startRound(mode, weapon, duration));
-    this.ui.on('resume', () => this.requestLock());
+    this.ui.on('resume', () => this.resume());
     this.ui.on('restart', () => this.startRound(this.modeKey, this.weapon.id, this.roundDuration));
     this.ui.on('quit', () => this.toMenu());
     this.ui.on('settingsChanged', () => this.applyLiveSettings());
@@ -85,13 +90,20 @@ class Game {
   // ---------------- Input ----------------
   bindInput() {
     document.addEventListener('mousemove', (e) => {
-      if (this.state === 'playing' && this.isLocked()) {
+      if (this.state !== 'playing') return;
+      if (this.isLocked()) {
         this.player.onMouse(e.movementX || 0, e.movementY || 0);
+      } else if (this.cursorAim) {
+        const r = this.canvas.getBoundingClientRect();
+        this.mouseNDC.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+        this.mouseNDC.y = -(((e.clientY - r.top) / r.height) * 2 - 1);
+        this.ui.setCrosshairPos(e.clientX, e.clientY);
       }
     });
 
     document.addEventListener('mousedown', (e) => {
-      if (this.state !== 'playing' || !this.isLocked()) return;
+      if (this.state !== 'playing') return;
+      if (!this.isLocked() && !this.cursorAim) return;
       if (e.button === 0) {
         this.firing = true;
         this.semiRequested = true;
@@ -110,7 +122,8 @@ class Game {
       this.keys.add(e.code);
       if (this.state === 'playing') {
         if (e.code === 'KeyR') this.startReload();
-        if (e.code === 'Escape') { /* Pointer-Lock verlässt automatisch -> pause */ }
+        // Im Cursor-Modus gibt es keinen Lock, der bei Esc verlassen wird -> selbst pausieren.
+        if (e.code === 'Escape' && this.cursorAim && !this.isLocked()) this.pauseGame();
       }
     });
     document.addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -124,23 +137,65 @@ class Game {
 
   requestLock() {
     audio.resumeAudio();
-    const p = this.canvas.requestPointerLock?.();
+    let p = null;
+    try { p = this.canvas.requestPointerLock?.(); } catch (e) { /* z.B. iframe */ }
     if (p && p.catch) p.catch(() => {});
+    // Falls Pointer-Lock nicht greift (eingebettet/blockiert): Cursor-Ziel-Fallback.
+    clearTimeout(this._lockCheck);
+    this._lockCheck = setTimeout(() => {
+      if ((this.state === 'playing' || this.state === 'paused') && !this.isLocked()) {
+        this.enableCursorAim();
+      }
+    }, 400);
+  }
+
+  enableCursorAim() {
+    this.cursorAim = true;
+    document.getElementById('game-root').classList.add('cursor-aim');
+    this.ui.setCursorHint(true);
+    if (this.state === 'paused') {
+      // im Pausemenü bleiben; wird per "Weiter" fortgesetzt
+      return;
+    }
+    this.state = 'playing';
+    this.ui.showScreen(null);
+    this.lastTime = performance.now();
+  }
+
+  resume() {
+    if (this.cursorAim) {
+      this.state = 'playing';
+      this.ui.showScreen(null);
+      document.getElementById('game-root').classList.add('cursor-aim');
+      this.lastTime = performance.now();
+    } else {
+      this.requestLock();
+    }
+  }
+
+  pauseGame() {
+    this.state = 'paused';
+    this.firing = false;
+    this.ui.showScreen('pause');
+    document.getElementById('game-root').classList.remove('cursor-aim');
   }
 
   onLockChange() {
     if (this.isLocked()) {
+      this.cursorAim = false;
+      clearTimeout(this._lockCheck);
+      document.getElementById('game-root').classList.remove('cursor-aim');
+      this.ui.setCursorHint(false);
+      this.ui.resetCrosshairPos();
       if (this.state === 'paused') {
         this.state = 'playing';
         this.ui.showScreen(null);
         this.lastTime = performance.now();
       }
     } else {
-      // Lock verloren -> pausieren (außer wir sind eh im Menü/Ergebnis).
-      if (this.state === 'playing') {
-        this.state = 'paused';
-        this.firing = false;
-        this.ui.showScreen('pause');
+      // Lock verloren -> pausieren (außer im Cursor-Modus, Menü oder Ergebnis).
+      if (this.state === 'playing' && !this.cursorAim) {
+        this.pauseGame();
       }
     }
   }
@@ -185,6 +240,8 @@ class Game {
   endRound() {
     this.state = 'results';
     this.firing = false;
+    clearTimeout(this._lockCheck);
+    document.getElementById('game-root').classList.remove('cursor-aim');
     if (this.isLocked()) document.exitPointerLock();
     if (this.mode) this.mode.stop();
     const isBest = submitScore(this.modeKey, {
@@ -197,6 +254,8 @@ class Game {
   toMenu() {
     this.state = 'menu';
     this.firing = false;
+    clearTimeout(this._lockCheck);
+    document.getElementById('game-root').classList.remove('cursor-aim');
     if (this.isLocked()) document.exitPointerLock();
     if (this.mode) { this.mode.stop(); this.mode = null; }
     this.targets.clear();
@@ -236,17 +295,21 @@ class Game {
     const w = this.weapon;
     const kick = w.fire();
     this.stats.shots++;
-    this.player.addRecoil(kick.up, kick.side);
+    // Im Cursor-Modus kickt der Recoil nicht die Kamera (Zielen läuft über den Mauszeiger).
+    if (!this.cursorAim) this.player.addRecoil(kick.up, kick.side);
     this.ui.muzzleFlash();
     audio.playShot(w.def.pitchAudio);
 
-    // Streuung als kleine NDC-Auslenkung des Strahls.
+    // Streuung als kleine NDC-Auslenkung des Strahls, ausgehend vom Zielpunkt
+    // (Bildmitte bei Pointer-Lock, Mauszeiger im Cursor-Modus).
     const spreadRad = THREE.MathUtils.degToRad(kick.spread);
     const halfFov = THREE.MathUtils.degToRad(settings.fov) / 2;
     const ndcScale = spreadRad / halfFov;
     const ang = Math.random() * Math.PI * 2;
     const rad = Math.sqrt(Math.random()) * ndcScale;
-    const ndc = { x: Math.cos(ang) * rad, y: Math.sin(ang) * rad };
+    const bx = this.cursorAim ? this.mouseNDC.x : 0;
+    const by = this.cursorAim ? this.mouseNDC.y : 0;
+    const ndc = { x: bx + Math.cos(ang) * rad, y: by + Math.sin(ang) * rad };
 
     const hit = this.mode.raycast(this.camera, ndc);
     if (hit) {

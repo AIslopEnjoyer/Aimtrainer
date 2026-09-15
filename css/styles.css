@@ -146,6 +146,16 @@ kbd { background: #222b38; border: 1px solid var(--border); border-radius: 4px; 
 /* ---------- HUD ---------- */
 #hud { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
 
+/* Im Cursor-Ziel-Modus den System-Cursor verstecken (DOM-Fadenkreuz übernimmt). */
+#game-root.cursor-aim { cursor: none; }
+
+#cursor-hint {
+  position: absolute; left: 50%; top: 16px; transform: translateX(-50%);
+  background: rgba(8,11,16,0.6); border: 1px solid var(--border);
+  padding: 5px 14px; border-radius: 20px; font-size: 12px; letter-spacing: 1px;
+  color: var(--accent2); text-transform: uppercase;
+}
+
 #crosshair {
   position: absolute; left: 50%; top: 50%;
   transform: translate(-50%, -50%);
