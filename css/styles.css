@@ -58,8 +58,9 @@ canvas#scene { display: block; width: 100%; height: 100%; }
 .settings-box { width: min(860px, 96vw); }
 
 .title {
+  font-family: "Chakra Petch", "Rajdhani", system-ui, sans-serif;
   font-size: 64px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 6px;
   line-height: 0.9;
   text-align: center;
