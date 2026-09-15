@@ -237,6 +237,7 @@ class Game {
     const kick = w.fire();
     this.stats.shots++;
     this.player.addRecoil(kick.up, kick.side);
+    this.ui.muzzleFlash();
     audio.playShot(w.def.pitchAudio);
 
     // Streuung als kleine NDC-Auslenkung des Strahls.

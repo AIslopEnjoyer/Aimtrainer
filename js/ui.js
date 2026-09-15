@@ -20,6 +20,7 @@ export class UI {
       chLeft: document.querySelector('.ch-left'),
       chRight: document.querySelector('.ch-right'),
       hitmarker: $('hitmarker'),
+      muzzle: $('muzzle'),
       damageFlash: $('damage-flash'),
       statTime: $('stat-time'),
       statScore: $('stat-score'),
@@ -233,6 +234,16 @@ export class UI {
     h.classList.add('show');
     clearTimeout(this._hitmarkerTimer);
     this._hitmarkerTimer = setTimeout(() => h.classList.remove('show'), kill ? 140 : 90);
+  }
+
+  muzzleFlash() {
+    const m = this.el.muzzle;
+    m.classList.remove('flash');
+    // Reflow erzwingen, damit die Klasse bei schnellem Feuern neu triggert.
+    void m.offsetWidth;
+    m.classList.add('flash');
+    clearTimeout(this._muzzleTimer);
+    this._muzzleTimer = setTimeout(() => m.classList.remove('flash'), 50);
   }
 
   damageFlash() {
