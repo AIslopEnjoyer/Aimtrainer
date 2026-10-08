@@ -3,6 +3,7 @@ import { createWorld, applyRendererQuality } from './scene.js';
 import { Player } from './player.js';
 import { TargetManager, Bot } from './targets.js';
 import { Weapon } from './weapons.js';
+import { Viewmodel } from './viewmodel.js';
 import { Stats, MODE_REGISTRY } from './modes.js';
 import { UI } from './ui.js';
 import { settings } from './settings.js';
@@ -17,6 +18,8 @@ class Game {
     this.state = 'menu'; // 'menu' | 'playing' | 'paused' | 'results'
     this.firing = false;
     this.semiRequested = false;
+    this.adsHeld = false;
+    this.adsT = 0;
     this.lastAntialias = settings.antialias;
 
     // Cursor-Ziel-Fallback, falls Pointer-Lock nicht verfügbar ist (z.B. eingebettet).
@@ -39,6 +42,7 @@ class Game {
     this._hudAccum = 0;
     this._emptyClickCd = 0;
 
+    this.viewmodel = new Viewmodel();
     this.buildWorld();
     this.bindInput();
     this.bindUI();
@@ -93,6 +97,7 @@ class Game {
       if (this.state !== 'playing') return;
       if (this.isLocked()) {
         this.player.onMouse(e.movementX || 0, e.movementY || 0);
+        this.viewmodel.look(e.movementX || 0, e.movementY || 0);
       } else if (this.cursorAim) {
         const r = this.canvas.getBoundingClientRect();
         this.mouseNDC.x = ((e.clientX - r.left) / r.width) * 2 - 1;
@@ -107,6 +112,8 @@ class Game {
       if (e.button === 0) {
         this.firing = true;
         this.semiRequested = true;
+      } else if (e.button === 2) {
+        this.adsHeld = true;
       }
     });
     document.addEventListener('mouseup', (e) => {
@@ -114,6 +121,8 @@ class Game {
         this.firing = false;
         this.semiRequested = false;
         this.weapon.resetBurst();
+      } else if (e.button === 2) {
+        this.adsHeld = false;
       }
     });
     window.addEventListener('contextmenu', (e) => { if (this.state === 'playing') e.preventDefault(); });
@@ -176,6 +185,7 @@ class Game {
   pauseGame() {
     this.state = 'paused';
     this.firing = false;
+    this.adsHeld = false;
     this.ui.showScreen('pause');
     document.getElementById('game-root').classList.remove('cursor-aim');
   }
@@ -208,6 +218,9 @@ class Game {
     this.ui._roundSeconds = duration;
 
     this.weapon.set(weaponId);
+    this.viewmodel.setWeapon(weaponId);
+    this.adsHeld = false;
+    this.adsT = 0;
     this.stats = new Stats();
 
     const ctx = {
@@ -240,6 +253,7 @@ class Game {
   endRound() {
     this.state = 'results';
     this.firing = false;
+    this.adsHeld = false;
     clearTimeout(this._lockCheck);
     document.getElementById('game-root').classList.remove('cursor-aim');
     if (this.isLocked()) document.exitPointerLock();
@@ -254,6 +268,7 @@ class Game {
   toMenu() {
     this.state = 'menu';
     this.firing = false;
+    this.adsHeld = false;
     clearTimeout(this._lockCheck);
     document.getElementById('game-root').classList.remove('cursor-aim');
     if (this.isLocked()) document.exitPointerLock();
@@ -295,15 +310,20 @@ class Game {
     const w = this.weapon;
     const kick = w.fire();
     this.stats.shots++;
+    const e = this.adsT;
     // Im Cursor-Modus kickt der Recoil nicht die Kamera (Zielen läuft über den Mauszeiger).
-    if (!this.cursorAim) this.player.addRecoil(kick.up, kick.side);
-    this.ui.muzzleFlash();
+    // Im ADS ist der Recoil schwächer.
+    if (!this.cursorAim) this.player.addRecoil(kick.up * (1 - 0.3 * e), kick.side * (1 - 0.3 * e));
+    this.viewmodel.kick(e);
     audio.playShot(w.def.pitchAudio);
 
+    // Streuung: im ADS deutlich enger, in Bewegung / in der Luft größer.
+    const moveFactor = 1 + Math.min(1, this.player.speed2D() / 8.5) * 0.8 + (this.player.onGround ? 0 : 1);
+    const spreadDeg = kick.spread * (1 - 0.7 * e) * moveFactor;
     // Streuung als kleine NDC-Auslenkung des Strahls, ausgehend vom Zielpunkt
     // (Bildmitte bei Pointer-Lock, Mauszeiger im Cursor-Modus).
-    const spreadRad = THREE.MathUtils.degToRad(kick.spread);
-    const halfFov = THREE.MathUtils.degToRad(settings.fov) / 2;
+    const spreadRad = THREE.MathUtils.degToRad(spreadDeg);
+    const halfFov = THREE.MathUtils.degToRad(this.camera.fov) / 2;
     const ndcScale = spreadRad / halfFov;
     const ang = Math.random() * Math.PI * 2;
     const rad = Math.sqrt(Math.random()) * ndcScale;
@@ -328,6 +348,7 @@ class Game {
     let dt = (now - this.lastTime) / 1000;
     this.lastTime = now;
     if (dt > 0.1) dt = 0.1; // Schutz nach Tab-Wechsel
+    if (dt < 0) dt = 0;     // rAF-Zeitstempel kann knapp vor lastTime liegen
 
     // Optionaler 60-FPS-Cap (für 120/144Hz-Displays).
     if (settings.fpsCap) {
@@ -352,9 +373,16 @@ class Game {
   update(dt) {
     this._emptyClickCd -= dt;
     this.weapon.update(dt);
+    this.updateAds(dt);
     this.handleFiring();
 
-    this.player.update(dt, this.keys, this.weapon.def.recover);
+    this.player.update(dt, this.keys, this.weapon.def.recover, this.adsT);
+    this.viewmodel.update(dt, {
+      adsT: this.cursorAim ? 0 : this.adsT,
+      speed: this.player.speed2D(),
+      onGround: this.player.onGround,
+      reloadProgress: this.weapon.reloading ? 1 - this.weapon.reloadLeft / this.weapon.def.reloadTime : 0,
+    });
     if (this.mode) this.mode.update(dt);
 
     // Timer
@@ -380,8 +408,27 @@ class Game {
     }
   }
 
+  // ADS: Halten der rechten Maustaste. Blockiert beim Nachladen. Zoomt das FOV.
+  updateAds(dt) {
+    const want = this.adsHeld && !this.weapon.reloading;
+    const step = dt / 0.16;
+    this.adsT = want ? Math.min(1, this.adsT + step) : Math.max(0, this.adsT - step);
+    const e = this.adsT * this.adsT * (3 - 2 * this.adsT);
+    const zoom = 1 + (this.viewmodel.zoom - 1) * e;
+    this.player.zoomRatio = this.viewmodel.zoom;
+    const fov = 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(settings.fov) / 2) / zoom) * 180 / Math.PI;
+    if (Math.abs(fov - this.camera.fov) > 0.01) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
+    document.getElementById('game-root').classList.toggle('ads', this.adsT > 0.5 && !this.cursorAim);
+  }
+
   render() {
+    this.renderer.autoClear = false;
+    this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
+    if (this.state === 'playing' || this.state === 'paused') this.viewmodel.render(this.renderer);
   }
 }
 

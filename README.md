@@ -48,6 +48,7 @@ python3 -m http.server 8080     # dann http://localhost:8080
 |-------|--------|
 | **Maus** | Zielen (Pointer Lock) |
 | **Linke Maustaste** | Schießen (halten bei Auto-Waffen) |
+| **Rechte Maustaste** | Zielen / ADS (halten): Zoom, weniger Streuung und Recoil, langsamer |
 | **W A S D** | Bewegen / Strafen |
 | **Leertaste** | Springen |
 | **R** | Nachladen |

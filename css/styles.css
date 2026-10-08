@@ -165,6 +165,9 @@ kbd { background: #222b38; border: 1px solid var(--border); border-radius: 4px; 
 .ch-dot, .ch-line { position: absolute; background: var(--ch-color, #00ff9c); }
 .ch-dot { display: none; }
 
+#crosshair { transition: opacity .08s ease; }
+.ads #crosshair { opacity: 0; }
+
 #hitmarker {
   position: absolute; left: 50%; top: 50%;
   width: 22px; height: 22px;

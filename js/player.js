@@ -3,10 +3,13 @@ import { settings } from './settings.js';
 
 const EYE = 1.7;
 const MAX_SPEED = 8.5;       // m/s
-const ACCEL = 60;
-const FRICTION = 10;
-const GRAVITY = 20;
+const GROUND_ACCEL = 70;     // m/s² Richtung Zielgeschwindigkeit (knackig, ~0.12 s bis Vollgas)
+const GROUND_BRAKE = 95;     // m/s² beim Loslassen / Richtungswechsel -> kein Nachrutschen
+const AIR_ACCEL = 14;        // m/s² in der Luft: Schwung bleibt erhalten, begrenzte Steuerung
+const GRAVITY = 22;
 const JUMP_V = 7.0;
+const RECOIL_HOLD = 0.09;    // Sekunden nach dem letzten Schuss, bevor der Recoil zurückläuft
+const RECOIL_FOLLOW = 38;    // wie schnell die Kamera dem Recoil-Ziel folgt (knackig, kein Federn)
 
 // Bewegungsbereich, damit der Spieler zum Ausweichen strafen kann.
 const BOUND = { xMin: -12, xMax: 12, zMin: -4, zMax: 12 };
@@ -16,8 +19,13 @@ export class Player {
     this.camera = camera;
     this.yaw = 0;
     this.pitch = 0;
-    this.recoilPitch = 0;
+    this.recoilPitch = 0;       // sichtbarer Recoil (folgt dem Ziel)
     this.recoilYaw = 0;
+    this.recoilTargetPitch = 0; // aufsummierter Recoil
+    this.recoilTargetYaw = 0;
+    this.sinceShot = 99;
+    this.adsT = 0;              // 0 = Hüfte, 1 = voll im ADS (für Sensitivität/Tempo)
+    this.zoomRatio = 1;         // Zoomfaktor im ADS (Sensitivität wird entsprechend skaliert)
     this.pos = new THREE.Vector3(0, EYE, 6);
     this.vel = new THREE.Vector3(0, 0, 0);
     this.onGround = true;
@@ -31,6 +39,10 @@ export class Player {
     this.pitch = 0;
     this.recoilPitch = 0;
     this.recoilYaw = 0;
+    this.recoilTargetPitch = 0;
+    this.recoilTargetYaw = 0;
+    this.sinceShot = 99;
+    this.adsT = 0;
     this.pos.set(0, EYE, 6);
     this.vel.set(0, 0, 0);
     this.onGround = true;
@@ -38,20 +50,40 @@ export class Player {
     this.apply();
   }
 
-  // Maus-Input (Pointer Lock deltas).
+  // Maus-Input (Pointer Lock deltas). Im ADS sinkt die Sensitivität mit dem Zoom,
+  // damit sich das Zielen unabhängig vom Zoom gleich anfühlt.
   onMouse(dx, dy) {
-    const s = settings.sensitivity * 0.0022;
-    this.yaw -= dx * s;
-    const invert = settings.invertY ? 1 : -1;
-    this.pitch += dy * s * invert;
+    const adsScale = 1 / (1 + (this.zoomRatio - 1) * this.adsT);
+    const s = settings.sensitivity * 0.0022 * adsScale;
+    const invert = settings.invertY ? -1 : 1;
+    // Blickänderung (positiv = nach oben / nach links)
+    const dYaw = -dx * s;
+    const dPitch = -dy * s * invert;
+    // Gegensteuern gegen den Recoil verbraucht zuerst den Recoil, damit die Kamera
+    // nach dem Loslassen nicht unter den Ausgangspunkt zurückfällt.
+    this.yaw += this._consume('Yaw', dYaw);
+    this.pitch += this._consume('Pitch', dPitch);
     const lim = Math.PI / 2 - 0.02;
     this.pitch = Math.max(-lim, Math.min(lim, this.pitch));
   }
 
+  _consume(axis, d) {
+    const t = 'recoilTarget' + axis;
+    const a = 'recoil' + axis;
+    if (this[t] * d < 0) {
+      const c = Math.sign(d) * Math.min(Math.abs(d), Math.abs(this[t]));
+      this[t] += c;
+      this[a] += c;
+      d -= c;
+    }
+    return d;
+  }
+
   // Recoil-Kick (in Grad) hinzufügen.
   addRecoil(upDeg, sideDeg) {
-    this.recoilPitch += THREE.MathUtils.degToRad(upDeg);
-    this.recoilYaw += THREE.MathUtils.degToRad(sideDeg);
+    this.recoilTargetPitch += THREE.MathUtils.degToRad(upDeg);
+    this.recoilTargetYaw += THREE.MathUtils.degToRad(sideDeg);
+    this.sinceShot = 0;
   }
 
   speed2D() {
@@ -63,16 +95,23 @@ export class Player {
     return this.hp <= 0;
   }
 
-  update(dt, keys, recoverSpeed) {
-    // ---- Recoil-Recovery ----
-    const decay = Math.exp(-recoverSpeed * dt);
-    this.recoilPitch *= decay;
-    this.recoilYaw *= decay;
+  update(dt, keys, recoverSpeed, adsT = 0) {
+    this.adsT = adsT;
+
+    // ---- Recoil: hält während des Feuerns, läuft danach weich zurück ----
+    this.sinceShot += dt;
+    if (this.sinceShot > RECOIL_HOLD) {
+      const decay = Math.exp(-recoverSpeed * dt);
+      this.recoilTargetPitch *= decay;
+      this.recoilTargetYaw *= decay;
+    }
+    const follow = 1 - Math.exp(-RECOIL_FOLLOW * dt);
+    this.recoilPitch += (this.recoilTargetPitch - this.recoilPitch) * follow;
+    this.recoilYaw += (this.recoilTargetYaw - this.recoilYaw) * follow;
 
     // ---- Bewegung (yaw-basierte Wunschrichtung) ----
     const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
-    // forward = -z bei yaw 0
-    const fwd = { x: -sin, z: -cos };
+    const fwd = { x: -sin, z: -cos };    // forward = -z bei yaw 0
     const right = { x: cos, z: -sin };
     let wishX = 0, wishZ = 0;
     if (keys.has('KeyW')) { wishX += fwd.x; wishZ += fwd.z; }
@@ -81,27 +120,24 @@ export class Player {
     if (keys.has('KeyA')) { wishX -= right.x; wishZ -= right.z; }
     const wishLen = Math.hypot(wishX, wishZ);
     if (wishLen > 0) { wishX /= wishLen; wishZ /= wishLen; }
+    const wishSpeed = MAX_SPEED * (1 - 0.35 * adsT);
 
-    // Beschleunigung / Reibung
-    if (wishLen > 0) {
-      this.vel.x += wishX * ACCEL * dt;
-      this.vel.z += wishZ * ACCEL * dt;
-      const sp = this.speed2D();
-      if (sp > MAX_SPEED) {
-        const f = MAX_SPEED / sp;
-        this.vel.x *= f; this.vel.z *= f;
-      }
-    } else {
-      const drop = 1 - Math.min(1, FRICTION * dt);
-      this.vel.x *= drop;
-      this.vel.z *= drop;
-    }
-
-    // Sprung / Schwerkraft
+    // Sprung zuerst, damit der Absprung-Frame schon als "in der Luft" zählt.
     if (keys.has('Space') && this.onGround) {
       this.vel.y = JUMP_V;
       this.onGround = false;
     }
+
+    const targetX = wishX * wishSpeed, targetZ = wishZ * wishSpeed;
+    if (this.onGround) {
+      // Läuft die Eingabe in Richtung der aktuellen Bewegung -> beschleunigen, sonst bremsen.
+      const along = this.vel.x * wishX + this.vel.z * wishZ;
+      const rate = wishLen > 0 && along >= 0 ? GROUND_ACCEL : GROUND_BRAKE;
+      this._approach(targetX, targetZ, rate * dt);
+    } else if (wishLen > 0) {
+      this._approach(targetX, targetZ, AIR_ACCEL * dt);
+    }
+
     this.vel.y -= GRAVITY * dt;
 
     // Position integrieren
@@ -114,6 +150,15 @@ export class Player {
     this.pos.z = Math.max(BOUND.zMin, Math.min(BOUND.zMax, this.pos.z));
 
     this.apply();
+  }
+
+  // Bewegt die horizontale Geschwindigkeit um höchstens `maxDelta` auf den Zielvektor zu.
+  _approach(tx, tz, maxDelta) {
+    const dx = tx - this.vel.x, dz = tz - this.vel.z;
+    const len = Math.hypot(dx, dz);
+    if (len < 1e-6 || len <= maxDelta) { this.vel.x = tx; this.vel.z = tz; return; }
+    this.vel.x += (dx / len) * maxDelta;
+    this.vel.z += (dz / len) * maxDelta;
   }
 
   apply() {
