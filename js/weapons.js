@@ -10,9 +10,9 @@ export const WEAPONS = {
     damage: 12,
     reloadTime: 1.85,
     // Recoil pro Schuss (Grad). Steigt an, leichte Seitwärtsbewegung.
-    recoil: { up: 0.55, side: 0.28, upRamp: 0.02, maxUp: 1.4 },
+    recoil: { up: 0.32, side: 0.22, upRamp: 0.004, maxUp: 0.55 },
     spread: 0.35,         // Streuung in Grad (Hüfte klein halten)
-    recover: 9.0,         // wie schnell Recoil zurückläuft (1/s)
+    recover: 7.0,         // wie schnell Recoil zurückläuft (1/s)
     pitchAudio: 1.15,
   },
   flatline: {
@@ -22,9 +22,9 @@ export const WEAPONS = {
     magSize: 20,
     damage: 19,
     reloadTime: 2.4,
-    recoil: { up: 0.95, side: 0.5, upRamp: 0.03, maxUp: 2.1 },
+    recoil: { up: 0.62, side: 0.34, upRamp: 0.01, maxUp: 1.0 },
     spread: 0.28,
-    recover: 6.0,
+    recover: 5.5,
     pitchAudio: 0.85,
   },
   wingman: {
@@ -34,9 +34,9 @@ export const WEAPONS = {
     magSize: 6,
     damage: 45,
     reloadTime: 2.1,
-    recoil: { up: 1.9, side: 0.35, upRamp: 0.0, maxUp: 1.9 },
+    recoil: { up: 1.7, side: 0.3, upRamp: 0.0, maxUp: 1.7 },
     spread: 0.05,
-    recover: 5.0,
+    recover: 6.0,
     pitchAudio: 0.7,
   },
 };
@@ -89,8 +89,8 @@ export class Weapon {
     this.cooldown = this.shotInterval;
     const r = this.def.recoil;
     const up = Math.min(r.maxUp, r.up + this.shotsInBurst * r.upRamp);
-    // seitlicher Recoil pseudo-zufällig, aber leicht wellig
-    const side = (Math.sin(this.shotsInBurst * 1.3) * 0.6 + (Math.random() - 0.5)) * r.side;
+    // Seitlicher Recoil: festes, erlernbares Wellenmuster plus kleiner Zufallsanteil.
+    const side = (Math.sin(this.shotsInBurst * 0.55) * 0.8 + (Math.random() - 0.5) * 0.4) * r.side;
     this.shotsInBurst++;
     return {
       up,
